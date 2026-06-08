@@ -1,0 +1,30 @@
+[package]
+name = "ephemeral-postgres"
+version = "0.1.0"
+edition = "2024"
+description = "Ephemeral PostgreSQL instances for Rust integration tests, backed by testcontainers (Docker)."
+license = "Apache-2.0"
+repository = "https://github.com/intentee/ephemeral-postgres"
+documentation = "https://docs.rs/ephemeral-postgres"
+readme = "README.md"
+keywords = ["postgres", "postgresql", "testing", "testcontainers", "sqlx"]
+categories = ["development-tools::testing", "database"]
+exclude = ["tests"]
+autotests = false
+
+[dependencies]
+anyhow = { workspace = true }
+sqlx = { workspace = true }
+testcontainers-modules = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

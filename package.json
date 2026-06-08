@@ -1,0 +1,8 @@
+{
+  "name": "ephemeral-postgres",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@intentee/rust-coverage-check": "0.3.1"
+  }
+}

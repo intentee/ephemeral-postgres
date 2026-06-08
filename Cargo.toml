@@ -1,0 +1,14 @@
+[workspace]
+resolver = "3"
+members = ["ephemeral-postgres"]
+
+[workspace.dependencies]
+anyhow = "1.0"
+sqlx = { version = "0.8", features = ["chrono", "derive", "json", "migrate", "postgres", "runtime-tokio", "tls-native-tls", "uuid"] }
+testcontainers-modules = { version = "=0.15.0", default-features = false, features = ["postgres"] }
+tokio = { version = "1.45", features = ["time"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[workspace.lints.clippy]
+ignored_unit_patterns = "warn"
+must_use_candidate = "warn"

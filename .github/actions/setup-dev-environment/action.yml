@@ -1,0 +1,7 @@
+name: setup dev environment
+description: Set up the Rust toolchain needed to build the project.
+runs:
+  using: composite
+  steps:
+    - name: setup rust
+      uses: ./.github/actions/setup-rust
