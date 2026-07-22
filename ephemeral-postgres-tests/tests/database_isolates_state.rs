@@ -1,9 +1,13 @@
 use ephemeral_postgres::cluster::Cluster;
+use ephemeral_postgres::cluster_params::ClusterParams;
+use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
 use sqlx::Row;
 
 #[tokio::test]
 async fn database_isolates_state_from_a_separate_database() {
-    let cluster = Cluster::start().await.unwrap();
+    let cluster = Cluster::start(ClusterParams::new(postgres_test_image()))
+        .await
+        .unwrap();
     let first = cluster.create_database().await.unwrap();
     let second = cluster.create_database().await.unwrap();
 

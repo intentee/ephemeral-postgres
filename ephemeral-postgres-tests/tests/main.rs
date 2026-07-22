@@ -1,5 +1,7 @@
 mod cluster_errors_when_image_invalid;
 mod cluster_errors_when_readiness_times_out;
+mod cluster_finalize_errors_when_mapped_port_unavailable;
+mod cluster_open_database_pool_errors_when_database_absent;
 mod database_create_with_id_errors_on_duplicate;
 mod database_exposes_db_name_and_url;
 mod database_isolates_state;

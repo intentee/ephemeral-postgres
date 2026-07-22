@@ -1,5 +1,3 @@
-COVERAGE_PACKAGES := -p ephemeral-postgres
-
 # -----------------------------------------------------------------------------
 # Real targets
 # -----------------------------------------------------------------------------
@@ -22,7 +20,7 @@ clippy:
 .PHONY: coverage
 coverage: node_modules
 	cargo llvm-cov clean --workspace
-	cargo llvm-cov $(COVERAGE_PACKAGES) --no-report
+	cargo llvm-cov --workspace --no-report
 	cargo llvm-cov report --json --output-path target/llvm-cov.json
 	npx rust-coverage-check target/llvm-cov.json \
 		--workspace-root $(CURDIR) \

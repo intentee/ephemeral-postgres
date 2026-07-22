@@ -1,25 +1,23 @@
 use std::time::Duration;
 
-use anyhow::Result;
-use anyhow::anyhow;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::time::Instant;
+
+use crate::ephemeral_postgres_error::EphemeralPostgresError;
 
 const ADMIN_POOL_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub async fn wait_until_postgres_admin_pool_ready(
     admin_url: &str,
     timeout: Duration,
-) -> Result<PgPool> {
+) -> Result<PgPool, EphemeralPostgresError> {
     let deadline = Instant::now() + timeout;
 
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(anyhow!(
-                "postgres admin pool did not become ready within {timeout:?}",
-            ));
+            return Err(EphemeralPostgresError::ReadinessTimeout { timeout });
         }
 
         let attempt = tokio::time::timeout(
@@ -41,29 +39,26 @@ pub async fn wait_until_postgres_admin_pool_ready(
 mod tests {
     use std::time::Duration;
 
+    use super::ADMIN_POOL_POLL_INTERVAL;
     use super::wait_until_postgres_admin_pool_ready;
 
-    // A zero budget makes the deadline already elapsed, so the wait returns before its first
-    // connection attempt.
+    const UNREACHABLE_ADMIN_URL: &str = "postgres://postgres@127.0.0.1:1/postgres";
+
     #[tokio::test]
     async fn errors_immediately_when_timeout_is_zero() {
-        let result = wait_until_postgres_admin_pool_ready(
-            "postgres://postgres@127.0.0.1:1/postgres",
-            Duration::ZERO,
-        )
-        .await;
+        let result =
+            wait_until_postgres_admin_pool_ready(UNREACHABLE_ADMIN_URL, Duration::ZERO).await;
 
         assert!(result.is_err());
     }
 
-    // Port 1 on loopback refuses connections immediately, so each poll fails fast and the deadline
-    // ends the loop. The 200ms budget exceeds the 50ms poll interval, exercising the retry path
-    // before the timeout error.
     #[tokio::test]
     async fn errors_after_polling_when_endpoint_unreachable() {
+        let budget_spanning_several_polls = ADMIN_POOL_POLL_INTERVAL * 4;
+
         let result = wait_until_postgres_admin_pool_ready(
-            "postgres://postgres@127.0.0.1:1/postgres",
-            Duration::from_millis(200),
+            UNREACHABLE_ADMIN_URL,
+            budget_spanning_several_polls,
         )
         .await;
 

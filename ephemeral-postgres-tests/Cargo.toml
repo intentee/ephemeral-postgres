@@ -1,0 +1,23 @@
+[package]
+name = "ephemeral-postgres-tests"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+autotests = false
+
+[dependencies]
+ephemeral-postgres = { workspace = true }
+
+[dev-dependencies]
+sqlx = { workspace = true }
+testcontainers-modules = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+uuid = { workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

@@ -1,19 +1,19 @@
 use std::time::Duration;
 
-const POSTGRES_IMAGE_TAG: &str =
-    "17@sha256:2a0d0fe14825b0939f78a8cad5cd4e6aa68bf94d0e5dd96e24b6d23af4315545";
+use crate::postgres_image::PostgresImage;
 
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct ClusterParams {
-    pub image_tag: String,
+    pub image: PostgresImage,
     pub readiness_timeout: Duration,
 }
 
-impl Default for ClusterParams {
-    fn default() -> Self {
+impl ClusterParams {
+    #[must_use]
+    pub fn new(image: PostgresImage) -> Self {
         Self {
-            image_tag: POSTGRES_IMAGE_TAG.to_owned(),
+            image,
             readiness_timeout: READINESS_TIMEOUT,
         }
     }

@@ -20,13 +20,21 @@ ephemeral-postgres = "0.1"
 
 ## Usage
 
+You choose the image — `ephemeral-postgres` never assumes one. Pass any
+postgres-protocol-compatible image (the official `postgres`, `postgis/postgis`,
+`timescale/timescaledb`, a private-registry mirror, …) as a name and tag.
+
 ```rust
 use ephemeral_postgres::cluster::Cluster;
+use ephemeral_postgres::cluster_params::ClusterParams;
+use ephemeral_postgres::postgres_image::PostgresImage;
 use sqlx::Row;
 
 #[tokio::test]
 async fn each_test_gets_an_isolated_database() {
-    let cluster = Cluster::start().await.unwrap();
+    let cluster = Cluster::start(ClusterParams::new(PostgresImage::new("postgres", "18")))
+        .await
+        .unwrap();
     let database = cluster.create_database().await.unwrap();
 
     let value: i32 = sqlx::query("SELECT 1::int AS value")
@@ -39,7 +47,7 @@ async fn each_test_gets_an_isolated_database() {
 }
 ```
 
-- `Cluster::start()` starts one PostgreSQL container.
+- `Cluster::start(params)` starts one PostgreSQL container from the image you provide.
 - `create_database()` / `create_database_with_id(uuid)` create freshly-isolated databases that
   share the container.
 - `database.pool()` returns an `sqlx::PgPool` connected to that database.
@@ -47,21 +55,22 @@ async fn each_test_gets_an_isolated_database() {
 
 ## Configuration
 
+`ClusterParams::new(image)` waits up to 30 seconds for the server to accept connections. Override
+the readiness timeout with struct-update syntax:
+
 ```rust
 use std::time::Duration;
 
 use ephemeral_postgres::cluster::Cluster;
 use ephemeral_postgres::cluster_params::ClusterParams;
+use ephemeral_postgres::postgres_image::PostgresImage;
 
-let cluster = Cluster::start_with_params(ClusterParams {
-    image_tag: "17".to_owned(),
+let cluster = Cluster::start(ClusterParams {
     readiness_timeout: Duration::from_secs(60),
+    ..ClusterParams::new(PostgresImage::new("postgres", "18"))
 })
 .await?;
 ```
-
-`ClusterParams::default()` pins a specific `postgres` image digest and waits up to 30 seconds for
-the server to accept connections.
 
 ## License
 

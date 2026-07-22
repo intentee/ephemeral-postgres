@@ -1,8 +1,12 @@
 use ephemeral_postgres::cluster::Cluster;
+use ephemeral_postgres::cluster_params::ClusterParams;
+use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
 
 #[tokio::test]
 async fn db_name_is_unique_hex_and_database_url_extends_cluster_base_url() {
-    let cluster = Cluster::start().await.unwrap();
+    let cluster = Cluster::start(ClusterParams::new(postgres_test_image()))
+        .await
+        .unwrap();
     let database = cluster.create_database().await.unwrap();
 
     let db_name = database.db_name();
