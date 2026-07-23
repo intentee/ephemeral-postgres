@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use sqlx::PgPool;
 
-use crate::cluster::Cluster;
+use crate::postgres_container::PostgresContainer;
 
 pub struct Database {
     #[expect(
         dead_code,
-        reason = "cluster Arc keeps the postgres container alive while this database is in use"
+        reason = "container Arc keeps the postgres container alive while this database is in use"
     )]
-    cluster: Arc<Cluster>,
+    container: Arc<PostgresContainer>,
     database_url: String,
     db_name: String,
     pool: PgPool,
@@ -18,9 +18,14 @@ pub struct Database {
 impl Database {
     #[doc(hidden)]
     #[must_use]
-    pub fn new(cluster: Arc<Cluster>, database_url: String, db_name: String, pool: PgPool) -> Self {
+    pub fn new(
+        container: Arc<PostgresContainer>,
+        database_url: String,
+        db_name: String,
+        pool: PgPool,
+    ) -> Self {
         Self {
-            cluster,
+            container,
             database_url,
             db_name,
             pool,

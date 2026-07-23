@@ -20,6 +20,13 @@ pub enum EphemeralPostgresError {
     #[error("postgres admin pool did not become ready within {timeout:?}")]
     ReadinessTimeout { timeout: Duration },
 
+    #[error("postgres admin pool did not become ready within {timeout:?}")]
+    ReadinessTimeoutAfterConnectionError {
+        timeout: Duration,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("failed to create ephemeral database {db_name}")]
     CreateDatabase {
         db_name: String,

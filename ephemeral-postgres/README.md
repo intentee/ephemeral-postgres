@@ -15,7 +15,7 @@ not required to build the crate or its documentation.
 
 ```toml
 [dev-dependencies]
-ephemeral-postgres = "0.1"
+ephemeral-postgres = "0.3"
 ```
 
 ## Usage
@@ -51,7 +51,20 @@ async fn each_test_gets_an_isolated_database() {
 - `create_database()` / `create_database_with_id(uuid)` create freshly-isolated databases that
   share the container.
 - `database.pool()` returns an `sqlx::PgPool` connected to that database.
-- Dropping the last `Arc<Cluster>` stops and removes the container.
+
+## Cleanup
+
+Cleanup is automatic and tied to ownership — you never close a cluster manually:
+
+- The container is stopped and removed as soon as the last `Arc<Cluster>` is dropped. Each
+  `Database` holds an `Arc<Cluster>`, so the container outlives the databases carved from it and
+  disappears once the cluster and all of its databases go out of scope at the end of the test.
+- Keep the cluster in a local binding for the duration of the test. Never store a `Cluster` or
+  `Database` in a `static`, `OnceLock`, or `lazy_static`: statics are never dropped, so the
+  container would leak for the whole lifetime of the test process.
+- If the test process is interrupted before those values drop — Ctrl-C, or a test runner killing
+  it on timeout — a watchdog still stops and removes the containers on `SIGINT`, `SIGTERM`, and
+  `SIGQUIT`.
 
 ## Configuration
 

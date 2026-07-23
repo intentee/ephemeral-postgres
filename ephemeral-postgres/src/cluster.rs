@@ -13,23 +13,19 @@ use uuid::Uuid;
 use crate::cluster_params::ClusterParams;
 use crate::database::Database;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
+use crate::postgres_container::PostgresContainer;
 use crate::wait_until_postgres_admin_pool_ready::wait_until_postgres_admin_pool_ready;
 
 const POSTGRES_HOST: &str = "127.0.0.1";
-const POSTGRES_CONTAINER_PORT: u16 = 5432;
 
 pub struct Cluster {
     admin_pool: PgPool,
     base_url: String,
-    #[expect(
-        dead_code,
-        reason = "container handle keeps the postgres container alive until the cluster Arc is dropped"
-    )]
-    container: ContainerAsync<Postgres>,
+    container: Arc<PostgresContainer>,
 }
 
 impl Cluster {
-    pub async fn start(params: ClusterParams) -> Result<Arc<Self>, EphemeralPostgresError> {
+    pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
         let ClusterParams {
             image,
             readiness_timeout,
@@ -48,14 +44,9 @@ impl Cluster {
     pub async fn from_started_container(
         container: ContainerAsync<Postgres>,
         readiness_timeout: Duration,
-    ) -> Result<Arc<Self>, EphemeralPostgresError> {
-        let port = container
-            .get_host_port_ipv4(POSTGRES_CONTAINER_PORT)
-            .await
-            .map_err(|source| EphemeralPostgresError::MappedPort {
-                container_port: POSTGRES_CONTAINER_PORT,
-                source,
-            })?;
+    ) -> Result<Self, EphemeralPostgresError> {
+        let container = PostgresContainer::new(container);
+        let port = container.mapped_host_port().await?;
 
         let base_url = format!("postgres://postgres@{POSTGRES_HOST}:{port}");
         let admin_pool = wait_until_postgres_admin_pool_ready(
@@ -64,19 +55,19 @@ impl Cluster {
         )
         .await?;
 
-        Ok(Arc::new(Self {
+        Ok(Self {
             admin_pool,
             base_url,
-            container,
-        }))
+            container: Arc::new(container),
+        })
     }
 
-    pub async fn create_database(self: &Arc<Self>) -> Result<Database, EphemeralPostgresError> {
+    pub async fn create_database(&self) -> Result<Database, EphemeralPostgresError> {
         self.create_database_with_id(Uuid::new_v4()).await
     }
 
     pub async fn create_database_with_id(
-        self: &Arc<Self>,
+        &self,
         database_id: Uuid,
     ) -> Result<Database, EphemeralPostgresError> {
         let db_name = format!("test_{}", database_id.simple());
@@ -94,7 +85,7 @@ impl Cluster {
 
     #[doc(hidden)]
     pub async fn open_database_pool(
-        self: &Arc<Self>,
+        &self,
         db_name: String,
     ) -> Result<Database, EphemeralPostgresError> {
         let database_url = format!("{}/{db_name}", self.base_url);
@@ -108,7 +99,12 @@ impl Cluster {
                 source,
             })?;
 
-        Ok(Database::new(Arc::clone(self), database_url, db_name, pool))
+        Ok(Database::new(
+            Arc::clone(&self.container),
+            database_url,
+            db_name,
+            pool,
+        ))
     }
 
     #[must_use]
