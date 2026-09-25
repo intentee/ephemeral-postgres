@@ -1,18 +1,17 @@
 use std::time::Duration;
 
-use crate::postgres_image::PostgresImage;
 use crate::readiness_timeout::READINESS_TIMEOUT;
 
-pub struct ClusterParams {
-    pub image: PostgresImage,
+pub struct AttachParams {
+    pub base_url: String,
     pub readiness_timeout: Duration,
 }
 
-impl ClusterParams {
+impl AttachParams {
     #[must_use]
-    pub fn new(image: PostgresImage) -> Self {
+    pub fn new(base_url: impl Into<String>) -> Self {
         Self {
-            image,
+            base_url: base_url.into(),
             readiness_timeout: READINESS_TIMEOUT,
         }
     }

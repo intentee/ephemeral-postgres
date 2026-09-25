@@ -52,13 +52,32 @@ async fn each_test_gets_an_isolated_database() {
   share the container.
 - `database.pool()` returns an `sqlx::PgPool` connected to that database.
 
+## Attaching to a running server
+
+When many test processes should share one server (for example a test runner that starts a separate
+process per test), start the server once outside the tests and attach to it from each test. Every
+attached cluster still carves out its own isolated databases:
+
+```rust
+use ephemeral_postgres::attach_params::AttachParams;
+use ephemeral_postgres::cluster::Cluster;
+
+let cluster = Cluster::attach(AttachParams::new("postgres://postgres@127.0.0.1:5432")).await?;
+let database = cluster.create_database().await?;
+```
+
+`AttachParams::new(base_url)` takes the server URL without a database name, waits for the server
+to accept connections exactly like `Cluster::start`, and never stops the server: whoever started
+it owns its lifetime.
+
 ## Cleanup
 
 Cleanup is automatic and tied to ownership — you never close a cluster manually:
 
-- The container is stopped and removed as soon as the last `Arc<Cluster>` is dropped. Each
-  `Database` holds an `Arc<Cluster>`, so the container outlives the databases carved from it and
-  disappears once the cluster and all of its databases go out of scope at the end of the test.
+- The container is stopped and removed as soon as the cluster that started it and every
+  `Database` carved from it are dropped. Each `Database` shares ownership of the container, so the
+  container outlives the cluster value if databases are still in use, and disappears once all of
+  them go out of scope at the end of the test.
 - Keep the cluster in a local binding for the duration of the test. Never store a `Cluster` or
   `Database` in a `static`, `OnceLock`, or `lazy_static`: statics are never dropped, so the
   container would leak for the whole lifetime of the test process.
@@ -68,8 +87,8 @@ Cleanup is automatic and tied to ownership — you never close a cluster manuall
 
 ## Configuration
 
-`ClusterParams::new(image)` waits up to 30 seconds for the server to accept connections. Override
-the readiness timeout with struct-update syntax:
+`ClusterParams::new(image)` and `AttachParams::new(base_url)` wait up to 30 seconds for the server
+to accept connections. Override the readiness timeout with struct-update syntax:
 
 ```rust
 use std::time::Duration;

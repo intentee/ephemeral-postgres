@@ -1,3 +1,5 @@
+mod cluster_attach_creates_databases_in_a_running_server;
+mod cluster_attach_errors_when_readiness_times_out;
 mod cluster_errors_when_image_invalid;
 mod cluster_errors_when_readiness_times_out;
 mod cluster_finalize_errors_when_mapped_port_unavailable;

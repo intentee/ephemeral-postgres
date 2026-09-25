@@ -10,7 +10,9 @@ use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use uuid::Uuid;
 
+use crate::attach_params::AttachParams;
 use crate::cluster_params::ClusterParams;
+use crate::cluster_server::ClusterServer;
 use crate::database::Database;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
 use crate::postgres_container::PostgresContainer;
@@ -21,10 +23,35 @@ const POSTGRES_HOST: &str = "127.0.0.1";
 pub struct Cluster {
     admin_pool: PgPool,
     base_url: String,
-    container: Arc<PostgresContainer>,
+    server: Arc<ClusterServer>,
 }
 
 impl Cluster {
+    pub async fn attach(params: AttachParams) -> Result<Self, EphemeralPostgresError> {
+        let AttachParams {
+            base_url,
+            readiness_timeout,
+        } = params;
+
+        Self::connect(base_url, ClusterServer::External, readiness_timeout).await
+    }
+
+    #[doc(hidden)]
+    pub async fn from_started_container(
+        container: ContainerAsync<Postgres>,
+        readiness_timeout: Duration,
+    ) -> Result<Self, EphemeralPostgresError> {
+        let container = PostgresContainer::new(container);
+        let port = container.mapped_host_port().await?;
+
+        Self::connect(
+            format!("postgres://postgres@{POSTGRES_HOST}:{port}"),
+            ClusterServer::Container(Box::new(container)),
+            readiness_timeout,
+        )
+        .await
+    }
+
     pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
         let ClusterParams {
             image,
@@ -40,26 +67,9 @@ impl Cluster {
         Self::from_started_container(container, readiness_timeout).await
     }
 
-    #[doc(hidden)]
-    pub async fn from_started_container(
-        container: ContainerAsync<Postgres>,
-        readiness_timeout: Duration,
-    ) -> Result<Self, EphemeralPostgresError> {
-        let container = PostgresContainer::new(container);
-        let port = container.mapped_host_port().await?;
-
-        let base_url = format!("postgres://postgres@{POSTGRES_HOST}:{port}");
-        let admin_pool = wait_until_postgres_admin_pool_ready(
-            &format!("{base_url}/postgres"),
-            readiness_timeout,
-        )
-        .await?;
-
-        Ok(Self {
-            admin_pool,
-            base_url,
-            container: Arc::new(container),
-        })
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     pub async fn create_database(&self) -> Result<Database, EphemeralPostgresError> {
@@ -100,15 +110,28 @@ impl Cluster {
             })?;
 
         Ok(Database::new(
-            Arc::clone(&self.container),
+            Arc::clone(&self.server),
             database_url,
             db_name,
             pool,
         ))
     }
 
-    #[must_use]
-    pub fn base_url(&self) -> &str {
-        &self.base_url
+    async fn connect(
+        base_url: String,
+        server: ClusterServer,
+        readiness_timeout: Duration,
+    ) -> Result<Self, EphemeralPostgresError> {
+        let admin_pool = wait_until_postgres_admin_pool_ready(
+            &format!("{base_url}/postgres"),
+            readiness_timeout,
+        )
+        .await?;
+
+        Ok(Self {
+            admin_pool,
+            base_url,
+            server: Arc::new(server),
+        })
     }
 }

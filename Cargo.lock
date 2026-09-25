@@ -549,7 +549,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-postgres"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "sqlx",
  "testcontainers-modules",
