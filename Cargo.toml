@@ -1,15 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["ephemeral-postgres", "ephemeral-postgres-run", "ephemeral-postgres-tests"]
+members = ["ephemeral-postgres"]
 
 [workspace.dependencies]
-ephemeral-postgres = { path = "ephemeral-postgres", version = "0.4.0" }
-ephemeral-postgres-tests = { path = "ephemeral-postgres-tests" }
+percent-encoding = "2.3"
 sqlx = { version = "0.9", features = ["chrono", "derive", "json", "migrate", "postgres", "runtime-tokio", "tls-native-tls", "uuid"] }
-testcontainers-modules = { version = "0.15", default-features = false, features = ["postgres", "watchdog"] }
 thiserror = "2.0"
-tokio = { version = "1.53", features = ["time"] }
-uuid = { version = "1.24", features = ["serde", "v4"] }
+tokio = { version = "1.53", features = ["rt"] }
+url = "2.5"
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -22,9 +20,6 @@ pedantic = { level = "deny", priority = -1 }
 expect_used = "deny"
 panic = "deny"
 unwrap_used = "deny"
-
-[workspace.metadata.heisenberg]
-test_crates = ["ephemeral-postgres-tests"]
 
 [[workspace.metadata.heisenberg.configurations]]
 name = "x86_64-unknown-linux-gnu"
