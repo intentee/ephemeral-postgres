@@ -27,6 +27,9 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// # Errors
+    ///
+    /// Fails when the server does not accept connections within the readiness timeout.
     pub async fn connect(params: ClusterConnectionParams) -> Result<Self, EphemeralPostgresError> {
         let ClusterConnectionParams {
             base_url,
@@ -43,21 +46,6 @@ impl Cluster {
             base_url,
             server: ClusterServer::External,
         })
-    }
-
-    pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
-        let ClusterParams {
-            image,
-            readiness_timeout,
-        } = params;
-
-        let container = image
-            .into_container_request()
-            .start()
-            .await
-            .map_err(|source| EphemeralPostgresError::ContainerStart { source })?;
-
-        Self::from_started_container(container, readiness_timeout).await
     }
 
     #[doc(hidden)]
@@ -82,10 +70,41 @@ impl Cluster {
         })
     }
 
+    /// # Errors
+    ///
+    /// Fails when the container cannot start, or when the server does not accept connections
+    /// within the readiness timeout.
+    pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
+        let ClusterParams {
+            image,
+            readiness_timeout,
+        } = params;
+
+        let container = image
+            .into_container_request()
+            .start()
+            .await
+            .map_err(|source| EphemeralPostgresError::ContainerStart { source })?;
+
+        Self::from_started_container(container, readiness_timeout).await
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// # Errors
+    ///
+    /// Fails when the database cannot be created or connected to.
     pub async fn create_database(&self) -> Result<Database, EphemeralPostgresError> {
         self.create_database_with_id(Uuid::new_v4()).await
     }
 
+    /// # Errors
+    ///
+    /// Fails when the database cannot be created, including when a database with this id already
+    /// exists, or connected to.
     pub async fn create_database_with_id(
         &self,
         database_id: Uuid,
@@ -125,10 +144,5 @@ impl Cluster {
             db_name,
             pool,
         ))
-    }
-
-    #[must_use]
-    pub fn base_url(&self) -> &str {
-        &self.base_url
     }
 }

@@ -1,8 +1,9 @@
+use sqlx::Row;
+
 use ephemeral_postgres::cluster::Cluster;
 use ephemeral_postgres::cluster_connection_params::ClusterConnectionParams;
 use ephemeral_postgres::cluster_params::ClusterParams;
 use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
-use sqlx::Row;
 
 #[tokio::test]
 async fn connected_cluster_creates_databases_on_the_running_server() {

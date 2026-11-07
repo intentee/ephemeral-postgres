@@ -1,7 +1,8 @@
+use sqlx::Row;
+
 use ephemeral_postgres::cluster::Cluster;
 use ephemeral_postgres::cluster_params::ClusterParams;
 use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
-use sqlx::Row;
 
 #[tokio::test]
 async fn database_provides_pool_that_executes_queries() {

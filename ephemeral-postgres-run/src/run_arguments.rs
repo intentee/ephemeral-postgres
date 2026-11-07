@@ -11,6 +11,10 @@ pub struct RunArguments {
 }
 
 impl RunArguments {
+    /// # Errors
+    ///
+    /// Fails when the image name, the image tag, the `--` separator or the command is missing, or
+    /// when another argument stands in place of the separator.
     pub fn parse(arguments: Vec<String>) -> Result<Self, EphemeralPostgresRunError> {
         let mut arguments = arguments.into_iter();
         let image_name = arguments

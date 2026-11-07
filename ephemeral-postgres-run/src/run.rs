@@ -1,11 +1,16 @@
-use ephemeral_postgres::cluster::Cluster;
-use ephemeral_postgres::cluster_params::ClusterParams;
 use tokio::process::Command;
 
+use ephemeral_postgres::cluster::Cluster;
+use ephemeral_postgres::cluster_params::ClusterParams;
+
+use crate::constants::SERVER_URL_VARIABLE;
 use crate::ephemeral_postgres_run_error::EphemeralPostgresRunError;
 use crate::run_arguments::RunArguments;
-use crate::server_url_variable::SERVER_URL_VARIABLE;
 
+/// # Errors
+///
+/// Fails when the arguments are invalid, the cluster cannot start, or the command cannot run or
+/// ends without an exit code.
 pub async fn run(arguments: Vec<String>) -> Result<i32, EphemeralPostgresRunError> {
     let RunArguments {
         command,

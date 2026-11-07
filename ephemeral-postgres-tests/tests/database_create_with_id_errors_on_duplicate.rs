@@ -1,8 +1,9 @@
+use uuid::Uuid;
+
 use ephemeral_postgres::cluster::Cluster;
 use ephemeral_postgres::cluster_params::ClusterParams;
 use ephemeral_postgres::ephemeral_postgres_error::EphemeralPostgresError;
 use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
-use uuid::Uuid;
 
 #[tokio::test]
 async fn create_with_id_errors_on_duplicate() {

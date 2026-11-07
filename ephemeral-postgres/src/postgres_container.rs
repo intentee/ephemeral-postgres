@@ -12,10 +12,13 @@ pub struct PostgresContainer {
 
 impl PostgresContainer {
     #[must_use]
-    pub fn new(container: ContainerAsync<Postgres>) -> Self {
+    pub const fn new(container: ContainerAsync<Postgres>) -> Self {
         Self { container }
     }
 
+    /// # Errors
+    ///
+    /// Fails when the container exposes no host port for postgres.
     pub async fn mapped_host_port(&self) -> Result<u16, EphemeralPostgresError> {
         self.container
             .get_host_port_ipv4(POSTGRES_CONTAINER_PORT)

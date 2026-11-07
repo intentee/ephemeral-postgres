@@ -3,12 +3,8 @@ use sqlx::PgPool;
 use crate::cluster_server::ClusterServer;
 
 pub struct Database {
-    #[expect(
-        dead_code,
-        reason = "the server handle keeps a started postgres container alive while this database is in use"
-    )]
-    server: ClusterServer,
-    database_url: String,
+    _server: ClusterServer,
+    url: String,
     db_name: String,
     pool: PgPool,
 }
@@ -16,13 +12,23 @@ pub struct Database {
 impl Database {
     #[doc(hidden)]
     #[must_use]
-    pub fn new(server: ClusterServer, database_url: String, db_name: String, pool: PgPool) -> Self {
+    pub const fn new(
+        server: ClusterServer,
+        database_url: String,
+        db_name: String,
+        pool: PgPool,
+    ) -> Self {
         Self {
-            server,
-            database_url,
+            _server: server,
+            url: database_url,
             db_name,
             pool,
         }
+    }
+
+    #[must_use]
+    pub fn database_url(&self) -> &str {
+        &self.url
     }
 
     #[must_use]
@@ -31,12 +37,7 @@ impl Database {
     }
 
     #[must_use]
-    pub fn database_url(&self) -> &str {
-        &self.database_url
-    }
-
-    #[must_use]
-    pub fn pool(&self) -> &PgPool {
+    pub const fn pool(&self) -> &PgPool {
         &self.pool
     }
 }

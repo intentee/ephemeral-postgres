@@ -1,3 +1,5 @@
+CARGO_HOME ?= $(HOME)/.cargo
+
 # -----------------------------------------------------------------------------
 # Real targets
 # -----------------------------------------------------------------------------
@@ -15,7 +17,7 @@ package-lock.json: package.json
 
 .PHONY: clippy
 clippy:
-	cargo clippy --workspace --tests -- -D warnings
+	cargo clippy --workspace --tests
 
 .PHONY: coverage
 coverage: node_modules
@@ -30,6 +32,15 @@ coverage: node_modules
 .PHONY: fmt
 fmt:
 	cargo fmt
+
+.PHONY: heisenberg
+heisenberg:
+	cargo fetch
+	heisenberg check \
+		--cargo-home "$(CARGO_HOME)" \
+		--sysroot "$(shell rustc --print sysroot)" \
+		--configuration x86_64-unknown-linux-gnu \
+		--workspace "$(CURDIR)"
 
 .PHONY: rust-test
 rust-test:

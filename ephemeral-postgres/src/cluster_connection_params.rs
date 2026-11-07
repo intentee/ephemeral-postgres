@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::readiness_timeout::READINESS_TIMEOUT;
+use crate::constants::READINESS_TIMEOUT;
 
 pub struct ClusterConnectionParams {
     pub base_url: String,
