@@ -26,8 +26,7 @@ coverage: node_modules
 	cargo llvm-cov report --json --output-path target/llvm-cov.json
 	npx rust-coverage-check target/llvm-cov.json \
 		--workspace-root $(CURDIR) \
-		--gated ephemeral-postgres=100 \
-		--gated ephemeral-postgres-run=100
+		--gated ephemeral-postgres=100
 
 .PHONY: fmt
 fmt:

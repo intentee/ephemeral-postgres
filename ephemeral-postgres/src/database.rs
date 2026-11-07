@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use sqlx::PgPool;
 
-use crate::cluster_server::ClusterServer;
+use crate::postgres_container::PostgresContainer;
 
 pub struct Database {
-    _server: ClusterServer,
+    _container: Arc<PostgresContainer>,
     url: String,
     db_name: String,
     pool: PgPool,
@@ -13,13 +15,13 @@ impl Database {
     #[doc(hidden)]
     #[must_use]
     pub const fn new(
-        server: ClusterServer,
+        container: Arc<PostgresContainer>,
         database_url: String,
         db_name: String,
         pool: PgPool,
     ) -> Self {
         Self {
-            _server: server,
+            _container: container,
             url: database_url,
             db_name,
             pool,

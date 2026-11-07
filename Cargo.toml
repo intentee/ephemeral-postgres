@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["ephemeral-postgres", "ephemeral-postgres-run", "ephemeral-postgres-tests"]
+members = ["ephemeral-postgres", "ephemeral-postgres-tests"]
 
 [workspace.dependencies]
-ephemeral-postgres = { path = "ephemeral-postgres", version = "0.4.0" }
+ephemeral-postgres = { path = "ephemeral-postgres", version = "0.5.0" }
 ephemeral-postgres-tests = { path = "ephemeral-postgres-tests" }
 sqlx = { version = "0.9", features = ["chrono", "derive", "json", "migrate", "postgres", "runtime-tokio", "tls-native-tls", "uuid"] }
 testcontainers-modules = { version = "0.15", default-features = false, features = ["postgres", "watchdog"] }

@@ -10,7 +10,7 @@ A running Docker daemon.
 
 ```toml
 [dev-dependencies]
-ephemeral-postgres = "0.4"
+ephemeral-postgres = "0.5"
 ```
 
 ## Usage
@@ -35,32 +35,6 @@ async fn each_test_gets_an_isolated_database() {
         .get("value");
 
     assert_eq!(value, 1);
-}
-```
-
-## Sharing one server across test processes
-
-```sh
-cargo install ephemeral-postgres-run --version 0.4.0 --locked
-ephemeral-postgres-run postgres 18 -- cargo nextest run
-```
-
-```rust
-use std::env;
-
-use ephemeral_postgres::cluster::Cluster;
-use ephemeral_postgres::cluster_connection_params::ClusterConnectionParams;
-
-#[tokio::test]
-async fn each_test_gets_an_isolated_database_on_the_shared_server() {
-    let cluster = Cluster::connect(ClusterConnectionParams::new(
-        env::var("EPHEMERAL_POSTGRES_URL").unwrap(),
-    ))
-    .await
-    .unwrap();
-    let database = cluster.create_database().await.unwrap();
-
-    sqlx::query("SELECT 1").execute(database.pool()).await.unwrap();
 }
 ```
 
