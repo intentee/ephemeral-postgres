@@ -1,0 +1,27 @@
+[package]
+name = "ephemeral-postgres-run"
+version = "0.4.0"
+edition = "2024"
+description = "Runs a command next to one ephemeral PostgreSQL server that all of its processes share."
+license = "Apache-2.0"
+repository = "https://github.com/intentee/ephemeral-postgres"
+documentation = "https://docs.rs/ephemeral-postgres-run"
+readme = "../README.md"
+keywords = ["postgres", "postgresql", "testing", "testcontainers"]
+categories = ["development-tools::testing", "database"]
+autotests = false
+
+[dependencies]
+ephemeral-postgres = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt"] }
+
+[dev-dependencies]
+ephemeral-postgres-tests = { workspace = true }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "integration"
+path = "tests/main.rs"

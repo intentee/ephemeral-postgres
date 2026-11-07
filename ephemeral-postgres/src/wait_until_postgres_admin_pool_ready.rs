@@ -17,7 +17,9 @@ pub async fn wait_until_postgres_admin_pool_ready(
     admin_url: &str,
     timeout: Duration,
 ) -> Result<PgPool, EphemeralPostgresError> {
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or(EphemeralPostgresError::ReadinessDeadlineOverflow { timeout })?;
     let mut last_connection_outcome = LastConnectionOutcome::NoConnectionErrorYet;
 
     loop {
@@ -58,8 +60,20 @@ mod tests {
 
     use super::ADMIN_POOL_POLL_INTERVAL;
     use super::wait_until_postgres_admin_pool_ready;
+    use crate::ephemeral_postgres_error::EphemeralPostgresError;
 
     const UNREACHABLE_ADMIN_URL: &str = "postgres://postgres@127.0.0.1:1/postgres";
+
+    #[tokio::test]
+    async fn rejects_a_timeout_whose_deadline_overflows() {
+        let result =
+            wait_until_postgres_admin_pool_ready(UNREACHABLE_ADMIN_URL, Duration::MAX).await;
+
+        assert!(matches!(
+            result,
+            Err(EphemeralPostgresError::ReadinessDeadlineOverflow { timeout }) if timeout == Duration::MAX
+        ));
+    }
 
     #[tokio::test]
     async fn times_out_without_a_cause_when_no_connection_is_attempted() {

@@ -1,8 +1,9 @@
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
+
 use ephemeral_postgres::cluster::Cluster;
 use ephemeral_postgres::cluster_params::ClusterParams;
 use ephemeral_postgres::ephemeral_postgres_error::EphemeralPostgresError;
 use ephemeral_postgres_tests::postgres_test_image::postgres_test_image;
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
 #[tokio::test]
 async fn finalize_errors_when_mapped_port_unavailable() {

@@ -17,6 +17,11 @@ pub enum EphemeralPostgresError {
         source: TestcontainersError,
     },
 
+    #[error(
+        "readiness timeout {timeout:?} puts the deadline past the latest representable instant"
+    )]
+    ReadinessDeadlineOverflow { timeout: Duration },
+
     #[error("postgres admin pool did not become ready within {timeout:?}")]
     ReadinessTimeout { timeout: Duration },
 

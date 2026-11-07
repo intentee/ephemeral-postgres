@@ -10,7 +10,9 @@ use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use uuid::Uuid;
 
+use crate::cluster_connection_params::ClusterConnectionParams;
 use crate::cluster_params::ClusterParams;
+use crate::cluster_server::ClusterServer;
 use crate::database::Database;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
 use crate::postgres_container::PostgresContainer;
@@ -21,23 +23,29 @@ const POSTGRES_HOST: &str = "127.0.0.1";
 pub struct Cluster {
     admin_pool: PgPool,
     base_url: String,
-    container: Arc<PostgresContainer>,
+    server: ClusterServer,
 }
 
 impl Cluster {
-    pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
-        let ClusterParams {
-            image,
+    /// # Errors
+    ///
+    /// Fails when the server does not accept connections within the readiness timeout.
+    pub async fn connect(params: ClusterConnectionParams) -> Result<Self, EphemeralPostgresError> {
+        let ClusterConnectionParams {
+            base_url,
             readiness_timeout,
         } = params;
+        let admin_pool = wait_until_postgres_admin_pool_ready(
+            &format!("{base_url}/postgres"),
+            readiness_timeout,
+        )
+        .await?;
 
-        let container = image
-            .into_container_request()
-            .start()
-            .await
-            .map_err(|source| EphemeralPostgresError::ContainerStart { source })?;
-
-        Self::from_started_container(container, readiness_timeout).await
+        Ok(Self {
+            admin_pool,
+            base_url,
+            server: ClusterServer::External,
+        })
     }
 
     #[doc(hidden)]
@@ -58,14 +66,45 @@ impl Cluster {
         Ok(Self {
             admin_pool,
             base_url,
-            container: Arc::new(container),
+            server: ClusterServer::Container(Arc::new(container)),
         })
     }
 
+    /// # Errors
+    ///
+    /// Fails when the container cannot start, or when the server does not accept connections
+    /// within the readiness timeout.
+    pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
+        let ClusterParams {
+            image,
+            readiness_timeout,
+        } = params;
+
+        let container = image
+            .into_container_request()
+            .start()
+            .await
+            .map_err(|source| EphemeralPostgresError::ContainerStart { source })?;
+
+        Self::from_started_container(container, readiness_timeout).await
+    }
+
+    #[must_use]
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// # Errors
+    ///
+    /// Fails when the database cannot be created or connected to.
     pub async fn create_database(&self) -> Result<Database, EphemeralPostgresError> {
         self.create_database_with_id(Uuid::new_v4()).await
     }
 
+    /// # Errors
+    ///
+    /// Fails when the database cannot be created, including when a database with this id already
+    /// exists, or connected to.
     pub async fn create_database_with_id(
         &self,
         database_id: Uuid,
@@ -100,15 +139,10 @@ impl Cluster {
             })?;
 
         Ok(Database::new(
-            Arc::clone(&self.container),
+            self.server.clone(),
             database_url,
             db_name,
             pool,
         ))
-    }
-
-    #[must_use]
-    pub fn base_url(&self) -> &str {
-        &self.base_url
     }
 }

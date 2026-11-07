@@ -1,3 +1,5 @@
+mod cluster_connect_errors_when_server_unreachable;
+mod cluster_connects_to_a_running_server;
 mod cluster_errors_when_image_invalid;
 mod cluster_errors_when_readiness_times_out;
 mod cluster_finalize_errors_when_mapped_port_unavailable;
