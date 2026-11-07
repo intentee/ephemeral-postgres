@@ -15,7 +15,7 @@ not required to build the crate or its documentation.
 
 ```toml
 [dev-dependencies]
-ephemeral-postgres = "0.3"
+ephemeral-postgres = "0.4"
 ```
 
 ## Usage
@@ -65,6 +65,43 @@ Cleanup is automatic and tied to ownership — you never close a cluster manuall
 - If the test process is interrupted before those values drop — Ctrl-C, or a test runner killing
   it on timeout — a watchdog still stops and removes the containers on `SIGINT`, `SIGTERM`, and
   `SIGQUIT`.
+
+## Sharing one server across test processes
+
+Test runners such as `cargo nextest` run every test in its own process, so each test would start
+its own container. When container startup dominates your test time, start one server for the
+whole run with `ephemeral-postgres-run` and let every test carve its own database from it:
+
+```sh
+cargo install ephemeral-postgres-run --version 0.4.0 --locked
+ephemeral-postgres-run postgres 18 -- cargo nextest run
+```
+
+`ephemeral-postgres-run <image-name> <image-tag> -- <command> [arguments...]` starts one
+PostgreSQL container, waits until it accepts connections, runs the command with the server's
+base URL in `EPHEMERAL_POSTGRES_URL`, removes the container, and exits with the command's exit
+code. Tests attach with `Cluster::connect` and stay isolated through their own databases:
+
+```rust
+use std::env;
+
+use ephemeral_postgres::cluster::Cluster;
+use ephemeral_postgres::cluster_connection_params::ClusterConnectionParams;
+
+#[tokio::test]
+async fn each_test_gets_an_isolated_database_on_the_shared_server() {
+    let cluster = Cluster::connect(ClusterConnectionParams::new(
+        env::var("EPHEMERAL_POSTGRES_URL").unwrap(),
+    ))
+    .await
+    .unwrap();
+    let database = cluster.create_database().await.unwrap();
+
+    sqlx::query("SELECT 1").execute(database.pool()).await.unwrap();
+}
+```
+
+A connected cluster never stops the server; `ephemeral-postgres-run` owns its lifetime.
 
 ## Configuration
 

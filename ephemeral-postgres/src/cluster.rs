@@ -10,7 +10,9 @@ use testcontainers_modules::testcontainers::ContainerAsync;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use uuid::Uuid;
 
+use crate::cluster_connection_params::ClusterConnectionParams;
 use crate::cluster_params::ClusterParams;
+use crate::cluster_server::ClusterServer;
 use crate::database::Database;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
 use crate::postgres_container::PostgresContainer;
@@ -21,10 +23,28 @@ const POSTGRES_HOST: &str = "127.0.0.1";
 pub struct Cluster {
     admin_pool: PgPool,
     base_url: String,
-    container: Arc<PostgresContainer>,
+    server: ClusterServer,
 }
 
 impl Cluster {
+    pub async fn connect(params: ClusterConnectionParams) -> Result<Self, EphemeralPostgresError> {
+        let ClusterConnectionParams {
+            base_url,
+            readiness_timeout,
+        } = params;
+        let admin_pool = wait_until_postgres_admin_pool_ready(
+            &format!("{base_url}/postgres"),
+            readiness_timeout,
+        )
+        .await?;
+
+        Ok(Self {
+            admin_pool,
+            base_url,
+            server: ClusterServer::External,
+        })
+    }
+
     pub async fn start(params: ClusterParams) -> Result<Self, EphemeralPostgresError> {
         let ClusterParams {
             image,
@@ -58,7 +78,7 @@ impl Cluster {
         Ok(Self {
             admin_pool,
             base_url,
-            container: Arc::new(container),
+            server: ClusterServer::Container(Arc::new(container)),
         })
     }
 
@@ -100,7 +120,7 @@ impl Cluster {
             })?;
 
         Ok(Database::new(
-            Arc::clone(&self.container),
+            self.server.clone(),
             database_url,
             db_name,
             pool,

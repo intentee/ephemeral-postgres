@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use crate::postgres_image::PostgresImage;
-
-const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
+use crate::readiness_timeout::READINESS_TIMEOUT;
 
 pub struct ClusterParams {
     pub image: PostgresImage,
