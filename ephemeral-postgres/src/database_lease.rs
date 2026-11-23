@@ -127,6 +127,38 @@ mod tests {
         Ok(())
     }
 
+    async fn leaves_its_database_to_the_next_reclaim<TCleanupOptions>(
+        cleanup_options: TCleanupOptions,
+    ) -> TestResult
+    where
+        TCleanupOptions: FnOnce(&DatabaseLease) -> PgConnectOptions,
+    {
+        let host = registry_host().await?;
+        let host_pool = host.open_pool().await?;
+        let mut lease = created_lease(host.database_options()).await?;
+        let database_name = lease.identity.name();
+        let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
+        let mut registry_connection = PgConnection::connect_with(&host.database_options()).await?;
+
+        lease.admin_options = cleanup_options(&lease);
+        drop(lease);
+        lease_lock
+            .wait_until_released(&mut registry_connection)
+            .await?;
+
+        verify(database_exists(&host_pool, &database_name).await?)?;
+
+        DatabaseRegistry {
+            connection: &mut registry_connection,
+        }
+        .reclaim_orphans()
+        .await?;
+
+        verify(!database_exists(&host_pool, &database_name).await?)?;
+
+        Ok(())
+    }
+
     #[test]
     fn rejects_a_registry_it_cannot_prepare() -> TestResult {
         block_on(async {
@@ -368,64 +400,16 @@ mod tests {
 
     #[test]
     fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_connect() -> TestResult {
-        block_on(async {
-            let host = registry_host().await?;
-            let host_pool = host.open_pool().await?;
-            let mut lease = created_lease(host.database_options()).await?;
-            let database_name = lease.identity.name();
-            let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
-            let mut registry_connection =
-                PgConnection::connect_with(&host.database_options()).await?;
-
-            lease.admin_options = host.database_options().port(1);
-            drop(lease);
-            lease_lock
-                .wait_until_released(&mut registry_connection)
-                .await?;
-
-            verify(database_exists(&host_pool, &database_name).await?)?;
-
-            DatabaseRegistry {
-                connection: &mut registry_connection,
-            }
-            .reclaim_orphans()
-            .await?;
-
-            verify(!database_exists(&host_pool, &database_name).await?)?;
-
-            Ok(())
-        })
+        block_on(leaves_its_database_to_the_next_reclaim(
+            |DatabaseLease { admin_options, .. }| admin_options.clone().port(1),
+        ))
     }
 
     #[test]
     fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_drop_it() -> TestResult {
-        block_on(async {
-            let host = registry_host().await?;
-            let host_pool = host.open_pool().await?;
-            let mut lease = created_lease(host.database_options()).await?;
-            let database_name = lease.identity.name();
-            let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
-            let mut registry_connection =
-                PgConnection::connect_with(&host.database_options()).await?;
-
-            lease.admin_options = lease.database_options();
-            drop(lease);
-            lease_lock
-                .wait_until_released(&mut registry_connection)
-                .await?;
-
-            verify(database_exists(&host_pool, &database_name).await?)?;
-
-            DatabaseRegistry {
-                connection: &mut registry_connection,
-            }
-            .reclaim_orphans()
-            .await?;
-
-            verify(!database_exists(&host_pool, &database_name).await?)?;
-
-            Ok(())
-        })
+        block_on(leaves_its_database_to_the_next_reclaim(
+            DatabaseLease::database_options,
+        ))
     }
 
     #[test]

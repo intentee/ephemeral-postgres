@@ -1,6 +1,6 @@
 [package]
 name = "ephemeral-postgres"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 description = "Isolated, self-cleaning PostgreSQL databases for Rust integration tests, on a server that the environment provides."
 license = "Apache-2.0"

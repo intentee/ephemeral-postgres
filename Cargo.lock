@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-postgres"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "ephemeral-postgres-tests",
  "percent-encoding",
