@@ -1,3 +1,4 @@
+mod constants;
 mod database_identity;
 mod database_lease;
 mod database_registry;
@@ -8,8 +9,3 @@ mod orphaned_database;
 mod server_connect_options;
 mod server_environment;
 mod ssl_mode_spelling;
-
-#[cfg(test)]
-mod database_exists;
-#[cfg(test)]
-mod held_advisory_lock;

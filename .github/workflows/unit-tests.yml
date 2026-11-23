@@ -31,6 +31,9 @@ jobs:
       - name: setup dev environment
         uses: ./.github/actions/setup-dev-environment
 
+      - name: setup nextest
+        uses: ./.github/actions/setup-nextest
+
       - name: run tests
         run: make rust-test
 

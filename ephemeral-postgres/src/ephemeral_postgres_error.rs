@@ -11,6 +11,13 @@ pub enum EphemeralPostgresError {
     #[error("the server url holds more than one path segment: `{path}`")]
     AmbiguousDatabasePath { path: String },
 
+    #[error("failed to connect to the admin database to remove ephemeral database {database_name}")]
+    CleanupConnection {
+        database_name: String,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("failed to start the runtime that removes an ephemeral database")]
     CleanupRuntime(#[source] std::io::Error),
 
@@ -31,10 +38,23 @@ pub enum EphemeralPostgresError {
         source: sqlx::Error,
     },
 
+    #[error("failed to drop orphaned ephemeral database {database_name}")]
+    DropOrphanedDatabase {
+        database_name: String,
+        #[source]
+        source: sqlx::Error,
+    },
+
     #[error("the database name in the server url is not valid UTF-8")]
     DatabaseNameNotUnicode {
         #[source]
         source: Utf8Error,
+    },
+
+    #[error("failed to find ephemeral databases whose owners are gone")]
+    FindOrphanedDatabases {
+        #[source]
+        source: sqlx::Error,
     },
 
     #[error("the server url names no database")]
@@ -74,12 +94,6 @@ pub enum EphemeralPostgresError {
         source: sqlx::Error,
     },
 
-    #[error("failed to reclaim ephemeral databases whose owners are gone")]
-    ReclaimOrphans {
-        #[source]
-        source: sqlx::Error,
-    },
-
     #[error("the server url sets sslmode more than once")]
     RepeatedSslMode,
 
@@ -94,6 +108,13 @@ pub enum EphemeralPostgresError {
 
     #[error("failed to unregister ephemeral database {database_name}")]
     UnregisterDatabase {
+        database_name: String,
+        #[source]
+        source: sqlx::Error,
+    },
+
+    #[error("failed to unregister orphaned ephemeral database {database_name}")]
+    UnregisterOrphanedDatabase {
         database_name: String,
         #[source]
         source: sqlx::Error,

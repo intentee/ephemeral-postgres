@@ -4,7 +4,6 @@ use sqlx::Connection;
 use sqlx::PgConnection;
 use sqlx::PgPool;
 use sqlx::postgres::PgConnectOptions;
-use sqlx::postgres::PgPoolOptions;
 
 use crate::database_identity::DatabaseIdentity;
 use crate::database_registry::DatabaseRegistry;
@@ -55,9 +54,7 @@ impl DatabaseLease {
     }
 
     pub async fn open_pool(&self) -> Result<PgPool, EphemeralPostgresError> {
-        PgPoolOptions::new()
-            .max_connections(5)
-            .connect_with(self.database_options())
+        PgPool::connect_with(self.database_options())
             .await
             .map_err(|source| EphemeralPostgresError::OpenPool {
                 database_name: self.identity.name(),
@@ -85,371 +82,368 @@ impl Drop for DatabaseLease {
 mod tests {
     use sqlx::AssertSqlSafe;
     use sqlx::Connection;
+    use sqlx::Error;
     use sqlx::PgConnection;
-    use sqlx::error::DatabaseError;
+    use sqlx::PgPool;
+    use sqlx::postgres::PgConnectOptions;
     use sqlx::query;
-    use sqlx::query_scalar;
     use sqlx::raw_sql;
 
+    use ephemeral_postgres_tests::block_on::block_on;
+    use ephemeral_postgres_tests::database_exists::database_exists;
+    use ephemeral_postgres_tests::has_sqlstate::has_sqlstate;
+    use ephemeral_postgres_tests::held_advisory_lock::HeldAdvisoryLock;
+    use ephemeral_postgres_tests::test_result::TestResult;
+    use ephemeral_postgres_tests::verify::verify;
+
     use super::DatabaseLease;
-    use crate::database_exists::database_exists;
+    use crate::constants::FIRST_ASSIGNABLE_OID;
+    use crate::database_identity::DatabaseIdentity;
     use crate::database_registry::DatabaseRegistry;
     use crate::ephemeral_postgres_error::EphemeralPostgresError;
-    use crate::held_advisory_lock::HeldAdvisoryLock;
     use crate::server_environment::ServerEnvironment;
 
-    async fn registry_host() -> DatabaseLease {
-        let mut host = DatabaseLease::acquire(
-            ServerEnvironment::current()
-                .server_connect_options()
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    async fn created_lease(
+        admin_options: PgConnectOptions,
+    ) -> Result<DatabaseLease, EphemeralPostgresError> {
+        let mut lease = DatabaseLease::acquire(admin_options).await?;
 
-        host.create_with_pool().await.unwrap();
+        lease.create_with_pool().await?;
 
-        host
+        Ok(lease)
     }
 
-    #[tokio::test]
-    async fn rejects_a_registry_it_cannot_prepare() {
-        let host = registry_host().await;
+    async fn registry_host() -> Result<DatabaseLease, EphemeralPostgresError> {
+        created_lease(ServerEnvironment::current().server_connect_options()?).await
+    }
 
+    async fn create_unregistered_database(pool: &PgPool, database_name: &str) -> Result<(), Error> {
         raw_sql(AssertSqlSafe(format!(
-            "ALTER DATABASE \"{}\" SET default_transaction_read_only = on",
-            host.identity.name()
+            "CREATE DATABASE \"{database_name}\" TEMPLATE template0"
         )))
-        .execute(&host.open_pool().await.unwrap())
-        .await
-        .unwrap();
+        .execute(pool)
+        .await?;
 
-        assert!(matches!(
-            DatabaseLease::acquire(host.database_options()).await,
-            Err(EphemeralPostgresError::PrepareRegistry { source })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("25006")
-        ));
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn rejects_a_registry_it_cannot_read() {
-        let host = registry_host().await;
+    #[test]
+    fn rejects_a_registry_it_cannot_prepare() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
 
-        raw_sql(
-            "CREATE SCHEMA ephemeral_postgres; \
-             CREATE TABLE ephemeral_postgres.databases (unrelated integer)",
-        )
-        .execute(&host.open_pool().await.unwrap())
-        .await
-        .unwrap();
+            raw_sql(AssertSqlSafe(format!(
+                "ALTER DATABASE \"{}\" SET default_transaction_read_only = on",
+                host.identity.name()
+            )))
+            .execute(&host.open_pool().await?)
+            .await?;
 
-        assert!(matches!(
-            DatabaseLease::acquire(host.database_options()).await,
-            Err(EphemeralPostgresError::ReclaimOrphans { source })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("42703")
-        ));
+            verify(matches!(
+                DatabaseLease::acquire(host.database_options()).await,
+                Err(EphemeralPostgresError::PrepareRegistry { source })
+                    if has_sqlstate(&source, "25006")
+            ))?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_a_registry_that_refuses_new_rows() {
-        let host = registry_host().await;
+    #[test]
+    fn rejects_a_registry_it_cannot_read() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
 
-        raw_sql(
-            "CREATE SCHEMA ephemeral_postgres; \
-             CREATE TABLE ephemeral_postgres.databases \
-             (database_oid integer PRIMARY KEY, blocker integer NOT NULL)",
-        )
-        .execute(&host.open_pool().await.unwrap())
-        .await
-        .unwrap();
+            raw_sql(
+                "CREATE SCHEMA ephemeral_postgres; \
+                 CREATE TABLE ephemeral_postgres.databases (unrelated integer)",
+            )
+            .execute(&host.open_pool().await?)
+            .await?;
 
-        assert!(matches!(
-            DatabaseLease::acquire(host.database_options()).await,
-            Err(EphemeralPostgresError::ReserveDatabase { source })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("23502")
-        ));
+            verify(matches!(
+                DatabaseLease::acquire(host.database_options()).await,
+                Err(EphemeralPostgresError::FindOrphanedDatabases { source })
+                    if has_sqlstate(&source, "42703")
+            ))?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_a_pool_against_a_database_it_has_not_created() {
-        let host = registry_host().await;
-        let lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
+    #[test]
+    fn rejects_a_registry_that_refuses_new_rows() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
 
-        assert!(matches!(
-            lease.open_pool().await,
-            Err(EphemeralPostgresError::OpenPool { source, .. })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("3D000")
-        ));
+            raw_sql(
+                "CREATE SCHEMA ephemeral_postgres; \
+                 CREATE TABLE ephemeral_postgres.databases \
+                 (database_oid integer PRIMARY KEY, blocker integer NOT NULL)",
+            )
+            .execute(&host.open_pool().await?)
+            .await?;
+
+            verify(matches!(
+                DatabaseLease::acquire(host.database_options()).await,
+                Err(EphemeralPostgresError::ReserveDatabase { source })
+                    if has_sqlstate(&source, "23502")
+            ))?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_a_taken_name_and_leaves_the_database_that_holds_it() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
-        let database_name = lease.identity.name();
+    #[test]
+    fn rejects_a_pool_against_a_database_it_has_not_created() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let lease = DatabaseLease::acquire(host.database_options()).await?;
 
-        raw_sql(AssertSqlSafe(format!(
-            "CREATE DATABASE \"{database_name}\""
-        )))
-        .execute(&host_pool)
-        .await
-        .unwrap();
+            verify(matches!(
+                lease.open_pool().await,
+                Err(EphemeralPostgresError::OpenPool { source, .. })
+                    if has_sqlstate(&source, "3D000")
+            ))?;
 
-        assert!(matches!(
-            lease.create_with_pool().await,
-            Err(EphemeralPostgresError::CreateDatabase { database_name: rejected, source })
-                if rejected == database_name
-                    && source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("42P04")
-        ));
-
-        drop(lease);
-
-        assert!(database_exists(&host_pool, &database_name).await);
-
-        raw_sql(AssertSqlSafe(format!("DROP DATABASE \"{database_name}\"")))
-            .execute(&host_pool)
-            .await
-            .unwrap();
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn reclaims_a_database_whose_owner_session_ended() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
+    #[test]
+    fn rejects_a_taken_name_and_leaves_the_database_that_holds_it() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let mut lease = DatabaseLease::acquire(host.database_options()).await?;
+            let taken = DatabaseIdentity {
+                oid: lease.identity.oid,
+            };
+            let database_name = taken.name();
 
-        lease.create_with_pool().await.unwrap();
+            create_unregistered_database(&host_pool, &database_name).await?;
 
-        let database_name = lease.identity.name();
-        let lease_backend: i32 = query_scalar("SELECT pg_backend_pid()")
-            .fetch_one(&mut lease.connection)
-            .await
-            .unwrap();
-        let lease_lock = HeldAdvisoryLock::held_by(&host_pool, lease_backend).await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
+            verify(matches!(
+                lease.create_with_pool().await,
+                Err(EphemeralPostgresError::CreateDatabase { database_name: rejected, source })
+                    if rejected == database_name && has_sqlstate(&source, "42P04")
+            ))?;
 
-        query("SELECT pg_terminate_backend($1)")
-            .bind(lease_backend)
-            .execute(&host_pool)
-            .await
-            .unwrap();
-        lease_lock
-            .wait_until_released(&mut registry_connection)
-            .await;
-        DatabaseRegistry {
-            connection: &mut registry_connection,
-        }
-        .reclaim_orphans()
-        .await
-        .unwrap();
+            drop(lease);
 
-        assert!(!database_exists(&host_pool, &database_name).await);
+            verify(database_exists(&host_pool, &database_name).await?)?;
+
+            taken
+                .drop_database(&mut *host_pool.acquire().await?)
+                .await?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn keeps_a_database_whose_oid_differs_from_the_registered_one() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut owner_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
-        let owner_backend: i32 = query_scalar("SELECT pg_backend_pid()")
-            .fetch_one(&mut owner_connection)
-            .await
-            .unwrap();
-        let mut owner_registry = DatabaseRegistry {
-            connection: &mut owner_connection,
-        };
+    #[test]
+    fn reclaims_a_database_whose_owner_session_ended() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let mut lease = created_lease(host.database_options()).await?;
+            let database_name = lease.identity.name();
+            let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
 
-        owner_registry.prepare().await.unwrap();
+            query("SELECT pg_terminate_backend($1)")
+                .bind(lease_lock.backend_pid)
+                .execute(&host_pool)
+                .await?;
+            lease_lock
+                .wait_until_released(&mut registry_connection)
+                .await?;
+            DatabaseRegistry {
+                connection: &mut registry_connection,
+            }
+            .reclaim_orphans()
+            .await?;
 
-        let database_name = owner_registry.reserve().await.unwrap().name();
-        let owner_lock = HeldAdvisoryLock::held_by(&host_pool, owner_backend).await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
+            verify(!database_exists(&host_pool, &database_name).await?)?;
 
-        drop(owner_connection);
-        owner_lock
-            .wait_until_released(&mut registry_connection)
-            .await;
-        raw_sql(AssertSqlSafe(format!(
-            "CREATE DATABASE \"{database_name}\""
-        )))
-        .execute(&host_pool)
-        .await
-        .unwrap();
-        DatabaseRegistry {
-            connection: &mut registry_connection,
-        }
-        .reclaim_orphans()
-        .await
-        .unwrap();
-
-        assert!(database_exists(&host_pool, &database_name).await);
-
-        raw_sql(AssertSqlSafe(format!("DROP DATABASE \"{database_name}\"")))
-            .execute(&host_pool)
-            .await
-            .unwrap();
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_reclaiming_the_database_it_is_connected_to() {
-        let host = registry_host().await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
-        let mut registry = DatabaseRegistry {
-            connection: &mut registry_connection,
-        };
+    #[test]
+    fn keeps_a_database_whose_oid_differs_from_the_registered_one() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let mut owner_connection = PgConnection::connect_with(&host.database_options()).await?;
+            let mut owner_registry = DatabaseRegistry {
+                connection: &mut owner_connection,
+            };
 
-        registry.prepare().await.unwrap();
-        query("INSERT INTO ephemeral_postgres.databases (database_oid) VALUES ($1)")
-            .bind(host.identity.oid)
+            owner_registry.prepare().await?;
+
+            let identity = owner_registry.reserve().await?;
+            let database_name = identity.name();
+            let owner_lock = HeldAdvisoryLock::held_by(&host_pool, &mut owner_connection).await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
+
+            drop(owner_connection);
+            owner_lock
+                .wait_until_released(&mut registry_connection)
+                .await?;
+            create_unregistered_database(&host_pool, &database_name).await?;
+            DatabaseRegistry {
+                connection: &mut registry_connection,
+            }
+            .reclaim_orphans()
+            .await?;
+
+            verify(database_exists(&host_pool, &database_name).await?)?;
+
+            identity.drop_database(&mut registry_connection).await?;
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn rejects_reclaiming_the_database_it_is_connected_to() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
+            let mut registry = DatabaseRegistry {
+                connection: &mut registry_connection,
+            };
+
+            registry.prepare().await?;
+            query("INSERT INTO ephemeral_postgres.databases (database_oid) VALUES ($1)")
+                .bind(host.identity.oid)
+                .execute(&mut *registry.connection)
+                .await?;
+
+            verify(matches!(
+                registry.reclaim_orphans().await,
+                Err(EphemeralPostgresError::DropOrphanedDatabase { database_name, source })
+                    if database_name == host.identity.name() && has_sqlstate(&source, "55006")
+            ))?;
+
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn rejects_an_orphan_it_cannot_unregister() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
+            let mut registry = DatabaseRegistry {
+                connection: &mut registry_connection,
+            };
+
+            registry.prepare().await?;
+            raw_sql(AssertSqlSafe(format!(
+                "CREATE FUNCTION refuse_unregistering() RETURNS trigger LANGUAGE plpgsql \
+                 AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$; \
+                 CREATE TRIGGER refuse_unregistering BEFORE DELETE ON ephemeral_postgres.databases \
+                 FOR EACH ROW EXECUTE FUNCTION refuse_unregistering(); \
+                 INSERT INTO ephemeral_postgres.databases (database_oid) VALUES ({FIRST_ASSIGNABLE_OID})"
+            )))
             .execute(&mut *registry.connection)
-            .await
-            .unwrap();
+            .await?;
 
-        assert!(matches!(
-            registry.reclaim_orphans().await,
-            Err(EphemeralPostgresError::ReclaimOrphans { source })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("55006")
-        ));
+            verify(matches!(
+                registry.reclaim_orphans().await,
+                Err(EphemeralPostgresError::UnregisterOrphanedDatabase { database_name, source })
+                    if database_name == DatabaseIdentity { oid: FIRST_ASSIGNABLE_OID }.name()
+                        && has_sqlstate(&source, "P0001")
+            ))?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_an_orphan_it_cannot_unregister() {
-        let host = registry_host().await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
-        let mut registry = DatabaseRegistry {
-            connection: &mut registry_connection,
-        };
+    #[test]
+    fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_connect() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let mut lease = created_lease(host.database_options()).await?;
+            let database_name = lease.identity.name();
+            let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
 
-        registry.prepare().await.unwrap();
-        raw_sql(
-            "CREATE FUNCTION refuse_unregistering() RETURNS trigger LANGUAGE plpgsql \
-             AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$; \
-             CREATE TRIGGER refuse_unregistering BEFORE DELETE ON ephemeral_postgres.databases \
-             FOR EACH ROW EXECUTE FUNCTION refuse_unregistering(); \
-             INSERT INTO ephemeral_postgres.databases (database_oid) VALUES (16384)",
-        )
-        .execute(&mut *registry.connection)
-        .await
-        .unwrap();
+            lease.admin_options = host.database_options().port(1);
+            drop(lease);
+            lease_lock
+                .wait_until_released(&mut registry_connection)
+                .await?;
 
-        assert!(matches!(
-            registry.reclaim_orphans().await,
-            Err(EphemeralPostgresError::ReclaimOrphans { source })
-                if source.as_database_error().and_then(DatabaseError::code).as_deref() == Some("P0001")
-        ));
+            verify(database_exists(&host_pool, &database_name).await?)?;
+
+            DatabaseRegistry {
+                connection: &mut registry_connection,
+            }
+            .reclaim_orphans()
+            .await?;
+
+            verify(!database_exists(&host_pool, &database_name).await?)?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_connect() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
+    #[test]
+    fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_drop_it() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let mut lease = created_lease(host.database_options()).await?;
+            let database_name = lease.identity.name();
+            let lease_lock = HeldAdvisoryLock::held_by(&host_pool, &mut lease.connection).await?;
+            let mut registry_connection =
+                PgConnection::connect_with(&host.database_options()).await?;
 
-        lease.create_with_pool().await.unwrap();
+            lease.admin_options = lease.database_options();
+            drop(lease);
+            lease_lock
+                .wait_until_released(&mut registry_connection)
+                .await?;
 
-        let database_name = lease.identity.name();
-        let lease_backend: i32 = query_scalar("SELECT pg_backend_pid()")
-            .fetch_one(&mut lease.connection)
-            .await
-            .unwrap();
-        let lease_lock = HeldAdvisoryLock::held_by(&host_pool, lease_backend).await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
+            verify(database_exists(&host_pool, &database_name).await?)?;
 
-        lease.admin_options = host.database_options().port(1);
-        drop(lease);
-        lease_lock
-            .wait_until_released(&mut registry_connection)
-            .await;
+            DatabaseRegistry {
+                connection: &mut registry_connection,
+            }
+            .reclaim_orphans()
+            .await?;
 
-        assert!(database_exists(&host_pool, &database_name).await);
+            verify(!database_exists(&host_pool, &database_name).await?)?;
 
-        DatabaseRegistry {
-            connection: &mut registry_connection,
-        }
-        .reclaim_orphans()
-        .await
-        .unwrap();
-
-        assert!(!database_exists(&host_pool, &database_name).await);
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn leaves_its_database_to_the_next_reclaim_when_cleanup_cannot_drop_it() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
+    #[test]
+    fn removes_its_database_even_when_it_cannot_unregister_it() -> TestResult {
+        block_on(async {
+            let host = registry_host().await?;
+            let host_pool = host.open_pool().await?;
+            let lease = created_lease(host.database_options()).await?;
+            let database_name = lease.identity.name();
 
-        lease.create_with_pool().await.unwrap();
+            query("DROP TABLE ephemeral_postgres.databases")
+                .execute(&host_pool)
+                .await?;
+            drop(lease);
 
-        let database_name = lease.identity.name();
-        let lease_backend: i32 = query_scalar("SELECT pg_backend_pid()")
-            .fetch_one(&mut lease.connection)
-            .await
-            .unwrap();
-        let lease_lock = HeldAdvisoryLock::held_by(&host_pool, lease_backend).await;
-        let mut registry_connection = PgConnection::connect_with(&host.database_options())
-            .await
-            .unwrap();
+            verify(!database_exists(&host_pool, &database_name).await?)?;
 
-        lease.admin_options = lease.database_options();
-        drop(lease);
-        lease_lock
-            .wait_until_released(&mut registry_connection)
-            .await;
-
-        assert!(database_exists(&host_pool, &database_name).await);
-
-        DatabaseRegistry {
-            connection: &mut registry_connection,
-        }
-        .reclaim_orphans()
-        .await
-        .unwrap();
-
-        assert!(!database_exists(&host_pool, &database_name).await);
-    }
-
-    #[tokio::test]
-    async fn removes_its_database_even_when_it_cannot_unregister_it() {
-        let host = registry_host().await;
-        let host_pool = host.open_pool().await.unwrap();
-        let mut lease = DatabaseLease::acquire(host.database_options())
-            .await
-            .unwrap();
-
-        lease.create_with_pool().await.unwrap();
-
-        let database_name = lease.identity.name();
-
-        query("DROP TABLE ephemeral_postgres.databases")
-            .execute(&host_pool)
-            .await
-            .unwrap();
-        drop(lease);
-
-        assert!(!database_exists(&host_pool, &database_name).await);
+            Ok(())
+        })
     }
 }

@@ -1,0 +1,15 @@
+[package]
+name = "ephemeral-postgres-tests"
+edition = "2024"
+publish = false
+
+[dependencies]
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

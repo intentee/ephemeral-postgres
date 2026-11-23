@@ -1,32 +1,23 @@
 CARGO_HOME ?= $(HOME)/.cargo
+HEISENBERG_ARGUMENTS := --cargo-home "$(CARGO_HOME)" --sysroot "$(shell rustc --print sysroot)" --configuration x86_64-unknown-linux-gnu --workspace "$(CURDIR)"
+RUST_SOURCES := $(wildcard */src/*.rs */tests/*.rs)
+WORKSPACE_MANIFESTS := $(wildcard Cargo.lock Cargo.toml */Cargo.toml)
 
-# -----------------------------------------------------------------------------
-# Real targets
-# -----------------------------------------------------------------------------
+.DELETE_ON_ERROR:
 
-node_modules: package-lock.json
-	npm ci
-	touch node_modules
-
-package-lock.json: package.json
-	npm install --package-lock-only
-
-# -----------------------------------------------------------------------------
-# Phony targets
-# -----------------------------------------------------------------------------
+target/llvm-cov.json: $(RUST_SOURCES) $(WORKSPACE_MANIFESTS) .config/nextest.toml rust-toolchain.toml
+	cargo llvm-cov clean --workspace
+	cargo llvm-cov nextest --no-report --workspace --lib --bins --tests --examples
+	cargo llvm-cov report --json --include-build-script --output-path $@
 
 .PHONY: clippy
 clippy:
 	cargo clippy --workspace --tests
 
 .PHONY: coverage
-coverage: node_modules
-	cargo llvm-cov clean --workspace
-	cargo llvm-cov --workspace --no-report
-	cargo llvm-cov report --json --output-path target/llvm-cov.json
-	npx rust-coverage-check target/llvm-cov.json \
-		--workspace-root $(CURDIR) \
-		--gated ephemeral-postgres=100
+coverage: target/llvm-cov.json
+	cargo fetch
+	heisenberg coverage-check $(HEISENBERG_ARGUMENTS) --coverage-export "$(CURDIR)/$<"
 
 .PHONY: fmt
 fmt:
@@ -35,12 +26,8 @@ fmt:
 .PHONY: heisenberg
 heisenberg:
 	cargo fetch
-	heisenberg check \
-		--cargo-home "$(CARGO_HOME)" \
-		--sysroot "$(shell rustc --print sysroot)" \
-		--configuration x86_64-unknown-linux-gnu \
-		--workspace "$(CURDIR)"
+	heisenberg check $(HEISENBERG_ARGUMENTS)
 
 .PHONY: rust-test
 rust-test:
-	cargo test --workspace
+	cargo nextest run --workspace

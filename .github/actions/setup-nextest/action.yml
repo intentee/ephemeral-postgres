@@ -1,0 +1,9 @@
+name: setup nextest
+description: Install cargo-nextest, which runs the tests.
+runs:
+  using: composite
+  steps:
+    - name: install cargo-nextest
+      uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c
+      with:
+        tool: cargo-nextest@0.9.151

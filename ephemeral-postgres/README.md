@@ -15,19 +15,24 @@ export EPHEMERAL_POSTGRES_URL='postgres://postgres@127.0.0.1:5432/postgres?sslmo
 
 ```toml
 [dev-dependencies]
-ephemeral-postgres = "0.5"
+ephemeral-postgres = "0.6"
 ```
 
 ## Usage
 
 ```rust
+use std::error::Error;
+
 use ephemeral_postgres::ephemeral_database::EphemeralDatabase;
+use sqlx::query;
 
 #[tokio::test]
-async fn each_test_gets_its_own_database() {
-    let database = EphemeralDatabase::create().await.unwrap();
+async fn each_test_gets_its_own_database() -> Result<(), Box<dyn Error>> {
+    let database = EphemeralDatabase::create().await?;
 
-    sqlx::query("SELECT 1").execute(database.pool()).await.unwrap();
+    query("SELECT 1").execute(database.pool()).await?;
+
+    Ok(())
 }
 ```
 

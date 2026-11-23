@@ -47,51 +47,69 @@ mod tests {
     use std::ffi::OsString;
     use std::io::ErrorKind;
 
+    use sqlx::Error;
+
+    use ephemeral_postgres_tests::block_on::block_on;
+    use ephemeral_postgres_tests::database_exists::database_exists;
+    use ephemeral_postgres_tests::test_result::TestResult;
+    use ephemeral_postgres_tests::verify::verify;
+
     use super::EphemeralDatabase;
-    use crate::database_exists::database_exists;
+    use crate::constants::SERVER_URL_VARIABLE;
     use crate::ephemeral_postgres_error::EphemeralPostgresError;
     use crate::server_environment::ServerEnvironment;
 
-    #[tokio::test]
-    async fn removes_its_database_when_dropped() {
-        let database = EphemeralDatabase::create().await.unwrap();
-        let database_name = database
-            .connect_options()
-            .get_database()
-            .unwrap()
-            .to_owned();
+    #[test]
+    fn removes_its_database_when_dropped() -> TestResult {
+        block_on(async {
+            let database = EphemeralDatabase::create().await?;
+            let database_name = database.connect_options().get_database().map(str::to_owned);
 
-        drop(database);
+            drop(database);
 
-        let observer = EphemeralDatabase::create().await.unwrap();
+            let observer = EphemeralDatabase::create().await?;
 
-        assert!(!database_exists(observer.pool(), &database_name).await);
+            verify(match database_name {
+                Some(name) => !database_exists(observer.pool(), &name).await?,
+                None => false,
+            })?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_an_environment_without_a_server_url() {
-        assert!(matches!(
-            EphemeralDatabase::create_in(ServerEnvironment {
-                variables: BTreeMap::new(),
-            })
-            .await,
-            Err(EphemeralPostgresError::MissingServerUrl { variable })
-                if variable == "EPHEMERAL_POSTGRES_URL"
-        ));
+    #[test]
+    fn rejects_an_environment_without_a_server_url() -> TestResult {
+        block_on(async {
+            verify(matches!(
+                EphemeralDatabase::create_in(ServerEnvironment {
+                    variables: BTreeMap::new(),
+                })
+                .await,
+                Err(EphemeralPostgresError::MissingServerUrl { variable })
+                    if variable == SERVER_URL_VARIABLE
+            ))?;
+
+            Ok(())
+        })
     }
 
-    #[tokio::test]
-    async fn rejects_a_server_it_cannot_reach() {
-        assert!(matches!(
-            EphemeralDatabase::create_in(ServerEnvironment {
-                variables: BTreeMap::from([(
-                    OsString::from("EPHEMERAL_POSTGRES_URL"),
-                    OsString::from("postgres://postgres@127.0.0.1:1/postgres?sslmode=disable"),
-                )]),
-            })
-            .await,
-            Err(EphemeralPostgresError::AdminConnection { source: sqlx::Error::Io(io_error) })
-                if io_error.kind() == ErrorKind::ConnectionRefused
-        ));
+    #[test]
+    fn rejects_a_server_it_cannot_reach() -> TestResult {
+        block_on(async {
+            verify(matches!(
+                EphemeralDatabase::create_in(ServerEnvironment {
+                    variables: BTreeMap::from([(
+                        OsString::from(SERVER_URL_VARIABLE),
+                        OsString::from("postgres://postgres@127.0.0.1:1/postgres?sslmode=disable"),
+                    )]),
+                })
+                .await,
+                Err(EphemeralPostgresError::AdminConnection { source: Error::Io(io_error) })
+                    if io_error.kind() == ErrorKind::ConnectionRefused
+            ))?;
+
+            Ok(())
+        })
     }
 }

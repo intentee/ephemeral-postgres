@@ -5,6 +5,7 @@ use std::ffi::OsString;
 
 use sqlx::postgres::PgConnectOptions;
 
+use crate::constants::SERVER_URL_VARIABLE;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
 use crate::server_connect_options::server_connect_options;
 
@@ -22,7 +23,6 @@ const CONFLICTING_VARIABLES: [&str; 12] = [
     "PGSSLROOTCERT",
     "PGUSER",
 ];
-const SERVER_URL_VARIABLE: &str = "EPHEMERAL_POSTGRES_URL";
 
 pub struct ServerEnvironment {
     pub variables: BTreeMap<OsString, OsString>,
@@ -69,31 +69,36 @@ mod tests {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
+    use ephemeral_postgres_tests::test_result::TestResult;
+    use ephemeral_postgres_tests::verify::verify;
+
     use super::ServerEnvironment;
+    use crate::constants::SERVER_URL_VARIABLE;
     use crate::ephemeral_postgres_error::EphemeralPostgresError;
 
     const SERVER_URL: &str = "postgres://user@db.example:6543/db?sslmode=disable";
 
     #[test]
-    fn reads_the_server_url() {
+    fn reads_the_server_url() -> TestResult {
         let options = ServerEnvironment {
             variables: BTreeMap::from([(
-                OsString::from("EPHEMERAL_POSTGRES_URL"),
+                OsString::from(SERVER_URL_VARIABLE),
                 OsString::from(SERVER_URL),
             )]),
         }
-        .server_connect_options()
-        .unwrap();
+        .server_connect_options()?;
 
-        assert_eq!(options.get_host(), "db.example");
+        verify(options.get_host() == "db.example")?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_libpq_variables_that_would_also_describe_the_server() {
+    fn rejects_libpq_variables_that_would_also_describe_the_server() -> TestResult {
         let result = ServerEnvironment {
             variables: BTreeMap::from([
                 (
-                    OsString::from("EPHEMERAL_POSTGRES_URL"),
+                    OsString::from(SERVER_URL_VARIABLE),
                     OsString::from(SERVER_URL),
                 ),
                 (OsString::from("PGPASSWORD"), OsString::from("secret")),
@@ -102,37 +107,43 @@ mod tests {
         }
         .server_connect_options();
 
-        assert!(matches!(
+        verify(matches!(
             result,
             Err(EphemeralPostgresError::ConflictingEnvironment { variables })
                 if variables == vec!["PGHOST", "PGPASSWORD"]
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_server_url() {
-        assert!(matches!(
+    fn rejects_a_missing_server_url() -> TestResult {
+        verify(matches!(
             ServerEnvironment {
                 variables: BTreeMap::new(),
             }
             .server_connect_options(),
             Err(EphemeralPostgresError::MissingServerUrl { variable })
-                if variable == "EPHEMERAL_POSTGRES_URL"
-        ));
+                if variable == SERVER_URL_VARIABLE
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_server_url_that_is_not_unicode() {
-        assert!(matches!(
+    fn rejects_a_server_url_that_is_not_unicode() -> TestResult {
+        verify(matches!(
             ServerEnvironment {
                 variables: BTreeMap::from([(
-                    OsString::from("EPHEMERAL_POSTGRES_URL"),
+                    OsString::from(SERVER_URL_VARIABLE),
                     OsString::from_vec(vec![0xff]),
                 )]),
             }
             .server_connect_options(),
             Err(EphemeralPostgresError::ServerUrlNotUnicode { variable })
-                if variable == "EPHEMERAL_POSTGRES_URL"
-        ));
+                if variable == SERVER_URL_VARIABLE
+        ))?;
+
+        Ok(())
     }
 }

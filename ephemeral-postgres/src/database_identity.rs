@@ -1,5 +1,6 @@
 use sqlx::AssertSqlSafe;
 use sqlx::Connection;
+use sqlx::Error;
 use sqlx::PgConnection;
 use sqlx::postgres::PgConnectOptions;
 use sqlx::query;
@@ -35,7 +36,7 @@ impl DatabaseIdentity {
         Ok(())
     }
 
-    pub async fn drop_database(&self, connection: &mut PgConnection) -> Result<(), sqlx::Error> {
+    pub async fn drop_database(&self, connection: &mut PgConnection) -> Result<(), Error> {
         raw_sql(AssertSqlSafe(format!(
             "DROP DATABASE IF EXISTS \"{}\" WITH (FORCE)",
             self.name()
@@ -69,7 +70,10 @@ impl DatabaseIdentity {
     ) -> Result<(), EphemeralPostgresError> {
         let mut connection = PgConnection::connect_with(admin_options)
             .await
-            .map_err(|source| EphemeralPostgresError::AdminConnection { source })?;
+            .map_err(|source| EphemeralPostgresError::CleanupConnection {
+                database_name: self.name(),
+                source,
+            })?;
 
         if matches!(stage, LeaseStage::Created) {
             self.drop_database(&mut connection)

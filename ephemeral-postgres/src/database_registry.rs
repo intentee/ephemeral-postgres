@@ -5,11 +5,11 @@ use sqlx::query_as;
 use sqlx::query_scalar;
 use sqlx::raw_sql;
 
+use crate::constants::FIRST_ASSIGNABLE_OID;
 use crate::database_identity::DatabaseIdentity;
 use crate::ephemeral_postgres_error::EphemeralPostgresError;
 use crate::orphaned_database::OrphanedDatabase;
 
-const FIRST_ASSIGNABLE_OID: i32 = 16384;
 const LOCK_NAMESPACE: i32 = i32::from_be_bytes(*b"epgr");
 const SETUP_LOCK: i32 = 0;
 
@@ -43,7 +43,7 @@ impl DatabaseRegistry<'_> {
         .bind(LOCK_NAMESPACE)
         .fetch_all(&mut *self.connection)
         .await
-        .map_err(|source| EphemeralPostgresError::ReclaimOrphans { source })?;
+        .map_err(|source| EphemeralPostgresError::FindOrphanedDatabases { source })?;
 
         for OrphanedDatabase {
             database_name,
@@ -56,7 +56,10 @@ impl DatabaseRegistry<'_> {
                 identity
                     .drop_database(self.connection)
                     .await
-                    .map_err(|source| EphemeralPostgresError::ReclaimOrphans { source })?;
+                    .map_err(|source| EphemeralPostgresError::DropOrphanedDatabase {
+                        database_name: identity.name(),
+                        source,
+                    })?;
             }
 
             query(
@@ -68,7 +71,10 @@ impl DatabaseRegistry<'_> {
             .bind(database_oid)
             .execute(&mut *self.connection)
             .await
-            .map_err(|source| EphemeralPostgresError::ReclaimOrphans { source })?;
+            .map_err(|source| EphemeralPostgresError::UnregisterOrphanedDatabase {
+                database_name: identity.name(),
+                source,
+            })?;
         }
 
         Ok(())

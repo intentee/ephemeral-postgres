@@ -139,191 +139,191 @@ pub fn server_connect_options(
 
 #[cfg(test)]
 mod tests {
-    use std::mem::discriminant;
-
     use sqlx::ConnectOptions;
     use sqlx::postgres::PgSslMode;
     use url::ParseError;
+
+    use ephemeral_postgres_tests::test_result::TestResult;
+    use ephemeral_postgres_tests::verify::verify;
 
     use super::server_connect_options;
     use crate::ephemeral_postgres_error::EphemeralPostgresError;
 
     #[test]
-    fn takes_every_part_from_the_url() {
+    fn takes_every_part_from_the_url() -> TestResult {
         let options = server_connect_options(
             "postgres://us%40er@db.example:6543/my%20db?sslmode=verify-full",
-        )
-        .unwrap();
+        )?;
 
-        assert_eq!(options.get_host(), "db.example");
-        assert_eq!(options.get_port(), 6543);
-        assert_eq!(options.get_username(), "us@er");
-        assert_eq!(options.get_database(), Some("my db"));
-        assert_eq!(
-            discriminant(&options.get_ssl_mode()),
-            discriminant(&PgSslMode::VerifyFull)
-        );
+        verify(options.get_host() == "db.example")?;
+        verify(options.get_port() == 6543)?;
+        verify(options.get_username() == "us@er")?;
+        verify(options.get_database() == Some("my db"))?;
+        verify(matches!(options.get_ssl_mode(), PgSslMode::VerifyFull))?;
+
+        Ok(())
     }
 
     #[test]
-    fn decodes_the_password() {
+    fn decodes_the_password() -> TestResult {
         let options =
-            server_connect_options("postgres://user:se%2Fcret@db.example:6543/db?sslmode=disable")
-                .unwrap();
+            server_connect_options("postgres://user:se%2Fcret@db.example:6543/db?sslmode=disable")?;
 
-        assert_eq!(options.to_url_lossy().password(), Some("se%2Fcret"));
+        verify(options.to_url_lossy().password() == Some("se%2Fcret"))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_an_unparsable_url() {
-        assert!(matches!(
+    fn rejects_an_unparsable_url() -> TestResult {
+        verify(matches!(
             server_connect_options("not a url"),
             Err(EphemeralPostgresError::UnparsableServerUrl { source })
                 if source == ParseError::RelativeUrlWithoutBase
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_another_scheme() {
-        assert!(matches!(
+    fn rejects_another_scheme() -> TestResult {
+        verify(matches!(
             server_connect_options("postgresql://user@db.example:6543/db?sslmode=disable"),
             Err(EphemeralPostgresError::UnsupportedScheme { scheme }) if scheme == "postgresql"
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_fragment() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres://user@db.example:6543/db?sslmode=disable#part")
-                    .err()
-                    .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::UnexpectedFragment)
-        );
+    fn rejects_a_fragment() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://user@db.example:6543/db?sslmode=disable#part"),
+            Err(EphemeralPostgresError::UnexpectedFragment)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_host() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres:///db?sslmode=disable")
-                    .err()
-                    .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::MissingHost)
-        );
+    fn rejects_a_missing_host() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres:///db?sslmode=disable"),
+            Err(EphemeralPostgresError::MissingHost)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_port() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres://user@db.example/db?sslmode=disable")
-                    .err()
-                    .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::MissingPort)
-        );
+    fn rejects_a_missing_port() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://user@db.example/db?sslmode=disable"),
+            Err(EphemeralPostgresError::MissingPort)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_username() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres://db.example:6543/db?sslmode=disable")
-                    .err()
-                    .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::MissingUsername)
-        );
+    fn rejects_a_missing_username() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://db.example:6543/db?sslmode=disable"),
+            Err(EphemeralPostgresError::MissingUsername)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_username_that_is_not_utf8() {
-        assert!(matches!(
+    fn rejects_a_username_that_is_not_utf8() -> TestResult {
+        verify(matches!(
             server_connect_options("postgres://%FF@db.example:6543/db?sslmode=disable"),
             Err(EphemeralPostgresError::UsernameNotUnicode { source }) if source.valid_up_to() == 0
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_password_that_is_not_utf8() {
-        assert!(matches!(
+    fn rejects_a_password_that_is_not_utf8() -> TestResult {
+        verify(matches!(
             server_connect_options("postgres://user:%FF@db.example:6543/db?sslmode=disable"),
             Err(EphemeralPostgresError::PasswordNotUnicode { source }) if source.valid_up_to() == 0
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_database() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres://user@db.example:6543/?sslmode=disable")
-                    .err()
-                    .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::MissingDatabase)
-        );
+    fn rejects_a_missing_database() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://user@db.example:6543/?sslmode=disable"),
+            Err(EphemeralPostgresError::MissingDatabase)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_path_with_several_segments() {
-        assert!(matches!(
+    fn rejects_a_path_with_several_segments() -> TestResult {
+        verify(matches!(
             server_connect_options("postgres://user@db.example:6543/db/extra?sslmode=disable"),
             Err(EphemeralPostgresError::AmbiguousDatabasePath { path }) if path == "/db/extra"
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_database_name_that_is_not_utf8() {
-        assert!(matches!(
+    fn rejects_a_database_name_that_is_not_utf8() -> TestResult {
+        verify(matches!(
             server_connect_options("postgres://user@db.example:6543/%FF?sslmode=disable"),
             Err(EphemeralPostgresError::DatabaseNameNotUnicode { source }) if source.valid_up_to() == 0
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_an_unexpected_query_parameter() {
-        assert!(matches!(
-            server_connect_options(
-                "postgres://user@db.example:6543/db?sslmode=disable&application_name=tests"
-            ),
+    fn rejects_an_unexpected_query_parameter() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://user@db.example:6543/db?sslmode=disable&application_name=tests"),
             Err(EphemeralPostgresError::UnexpectedQueryParameter { name }) if name == "application_name"
-        ));
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_missing_ssl_mode() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options("postgres://user@db.example:6543/db")
-                    .err()
-                    .unwrap()
+    fn rejects_a_missing_ssl_mode() -> TestResult {
+        verify(matches!(
+            server_connect_options("postgres://user@db.example:6543/db"),
+            Err(EphemeralPostgresError::MissingSslMode)
+        ))?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_a_repeated_ssl_mode() -> TestResult {
+        verify(matches!(
+            server_connect_options(
+                "postgres://user@db.example:6543/db?sslmode=disable&sslmode=disable"
             ),
-            discriminant(&EphemeralPostgresError::MissingSslMode)
-        );
+            Err(EphemeralPostgresError::RepeatedSslMode)
+        ))?;
+
+        Ok(())
     }
 
     #[test]
-    fn rejects_a_repeated_ssl_mode() {
-        assert_eq!(
-            discriminant(
-                &server_connect_options(
-                    "postgres://user@db.example:6543/db?sslmode=disable&sslmode=disable"
-                )
-                .err()
-                .unwrap()
-            ),
-            discriminant(&EphemeralPostgresError::RepeatedSslMode)
-        );
-    }
-
-    #[test]
-    fn rejects_an_ssl_mode_libpq_does_not_spell_that_way() {
-        assert!(matches!(
+    fn rejects_an_ssl_mode_libpq_does_not_spell_that_way() -> TestResult {
+        verify(matches!(
             server_connect_options("postgres://user@db.example:6543/db?sslmode=DISABLE"),
             Err(EphemeralPostgresError::UnknownSslMode { value }) if value == "DISABLE"
-        ));
+        ))?;
+
+        Ok(())
     }
 }
